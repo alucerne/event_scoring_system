@@ -7,6 +7,7 @@ import pandas as pd
 import uvicorn
 import json
 from json.decoder import JSONDecoder
+import numpy as np
 
 app = FastAPI()
 
@@ -111,16 +112,21 @@ async def score_events(request: Request):
     emails = df[["hem_sha256", "personal_emails"]].dropna().drop_duplicates()
     final = final.merge(emails, on="hem_sha256", how="left")
 
-    # Replace problematic values and cast safely to float
-    final = final.replace([pd.NA, float('nan'), None], None)
-    result = final[["hem_sha256", "personal_emails", "final_score"]].fillna(0).to_dict(orient="records")
+    # Replace and filter final output
+    final["final_score"] = final["final_score"].replace([np.inf, -np.inf, np.nan], 0)
+    final = final.fillna("unknown")
 
     safe_result = []
-    for row in result:
+    for _, row in final.iterrows():
+        try:
+            score = float(row["final_score"])
+        except:
+            score = 0.0
+
         safe_result.append({
             "hem_sha256": row["hem_sha256"],
             "personal_emails": row["personal_emails"],
-            "final_score": float(row["final_score"]) if row["final_score"] is not None else 0.0
+            "final_score": score
         })
 
     return {"results": safe_result}
