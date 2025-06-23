@@ -74,11 +74,14 @@ async def score_events(request: Request):
     all_events = []
     for block in payload:
         for e in block.get("events", []):
+            raw_email = e.get("resolution", {}).get("PERSONAL_EMAILS", "")
+            email = raw_email.split(",")[0].strip() if raw_email else None
+
             all_events.append({
                 "hem_sha256": e.get("hem_sha256"),
                 "event_type": e.get("event_type"),
                 "event_timestamp": e.get("event_timestamp"),
-                "personal_emails": e.get("resolution", {}).get("PERSONAL_EMAILS")
+                "personal_emails": email
             })
 
     df = pd.DataFrame(all_events)
@@ -112,7 +115,6 @@ async def score_events(request: Request):
     emails = df[["hem_sha256", "personal_emails"]].dropna().drop_duplicates()
     final = final.merge(emails, on="hem_sha256", how="left")
 
-    # Replace and filter final output
     final["final_score"] = final["final_score"].replace([np.inf, -np.inf, np.nan], 0)
     final = final.fillna("unknown")
 
