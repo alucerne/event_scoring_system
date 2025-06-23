@@ -111,11 +111,19 @@ async def score_events(request: Request):
     emails = df[["hem_sha256", "personal_emails"]].dropna().drop_duplicates()
     final = final.merge(emails, on="hem_sha256", how="left")
 
-    result = final.sort_values("final_score", ascending=False)[
-        ["hem_sha256", "personal_emails", "final_score"]
-    ].replace({pd.NA: None, float('nan'): None}).to_dict(orient="records")
+    # Replace problematic values and cast safely to float
+    final = final.replace([pd.NA, float('nan'), None], None)
+    result = final[["hem_sha256", "personal_emails", "final_score"]].fillna(0).to_dict(orient="records")
 
-    return json.loads(json.dumps({"results": result}))
+    safe_result = []
+    for row in result:
+        safe_result.append({
+            "hem_sha256": row["hem_sha256"],
+            "personal_emails": row["personal_emails"],
+            "final_score": float(row["final_score"]) if row["final_score"] is not None else 0.0
+        })
+
+    return {"results": safe_result}
 
 # Uncomment to run locally
 # if __name__ == "__main__":
