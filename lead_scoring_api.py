@@ -113,9 +113,9 @@ async def score_events(request: Request):
 
     result = final.sort_values("final_score", ascending=False)[
         ["hem_sha256", "personal_emails", "final_score"]
-    ].to_dict(orient="records")
+    ].replace({pd.NA: None, float('nan'): None}).to_dict(orient="records")
 
-    return {"results": result}
+    return json.loads(json.dumps({"results": result}))
 
 # Uncomment to run locally
 # if __name__ == "__main__":
