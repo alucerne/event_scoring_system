@@ -5,23 +5,12 @@ from typing import List, Optional
 from datetime import datetime
 import pandas as pd
 import uvicorn
+import json
 
 app = FastAPI()
 
 # -----------------------------
-# Data Models
-# -----------------------------
-class Event(BaseModel):
-    hem_sha256: str
-    event_type: str
-    event_timestamp: str  # ISO timestamp
-    resolution: Optional[dict] = {}
-
-class EventPayload(BaseModel):
-    events: List[Event]
-
-# -----------------------------
-# Scoring Logic
+# Scoring Logic Setup
 # -----------------------------
 event_weights = {
     "all_form_submissions": 10,
@@ -68,18 +57,24 @@ def velocity_bonus(event_count, duration_min):
     return 0
 
 # -----------------------------
-# API Endpoint
+# POST /score Endpoint
 # -----------------------------
 @app.post("/score")
-async def score_events(payload: List[EventPayload]):
+async def score_events(request: Request):
+    try:
+        raw_body = await request.body()
+        payload = json.loads(raw_body)
+    except Exception as e:
+        return {"error": "JSON decode failed", "reason": str(e)}
+
     all_events = []
     for block in payload:
-        for e in block.events:
+        for e in block.get("events", []):
             all_events.append({
-                "hem_sha256": e.hem_sha256,
-                "event_type": e.event_type,
-                "event_timestamp": e.event_timestamp,
-                "personal_emails": e.resolution.get("PERSONAL_EMAILS")
+                "hem_sha256": e.get("hem_sha256"),
+                "event_type": e.get("event_type"),
+                "event_timestamp": e.get("event_timestamp"),
+                "personal_emails": e.get("resolution", {}).get("PERSONAL_EMAILS")
             })
 
     df = pd.DataFrame(all_events)
