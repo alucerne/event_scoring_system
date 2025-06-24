@@ -1,7 +1,5 @@
-# lead_event_grouping.py (merged)
+# lead_scoring_system.py (unified scoring + grouping API)
 from fastapi import FastAPI, Request
-from pydantic import BaseModel
-from typing import List, Optional
 from datetime import datetime
 import pandas as pd
 import uvicorn
@@ -12,7 +10,7 @@ import numpy as np
 app = FastAPI()
 
 # -----------------------------
-# POST /score Endpoint
+# Scoring Config
 # -----------------------------
 event_weights = {
     "all_form_submissions": 10,
@@ -58,6 +56,9 @@ def velocity_bonus(event_count, duration_min):
         return 1
     return 0
 
+# -----------------------------
+# POST /score Endpoint
+# -----------------------------
 @app.post("/score")
 async def score_events(request: Request):
     try:
@@ -71,7 +72,8 @@ async def score_events(request: Request):
     all_events = []
     for block in payload:
         for e in block.get("events", []):
-            raw_email = e.get("resolution", {}).get("PERSONAL_EMAILS", "")
+            resolution = e.get("resolution", {})
+            raw_email = resolution.get("PERSONAL_EMAILS", "")
             email = raw_email.split(",")[0].strip() if raw_email else None
 
             all_events.append({
@@ -146,7 +148,8 @@ async def group_events(request: Request):
     all_events = []
     for block in payload:
         for e in block.get("events", []):
-            raw_email = e.get("resolution", {}).get("PERSONAL_EMAILS", "")
+            resolution = e.get("resolution", {})
+            raw_email = resolution.get("PERSONAL_EMAILS", "")
             email = raw_email.split(",")[0].strip() if raw_email else None
 
             all_events.append({
@@ -160,7 +163,7 @@ async def group_events(request: Request):
     df.dropna(subset=["hem_sha256", "event_type"], inplace=True)
 
     grouped = df.groupby(["hem_sha256", "personal_emails"]).agg(
-        events_collected=("event_type", lambda x: ", ".join(sorted(x)))
+        events_collected=("event_type", lambda x: ", ".join(sorted(set(x))))
     ).reset_index()
 
     results = grouped.to_dict(orient="records")
