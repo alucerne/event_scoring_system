@@ -1,4 +1,4 @@
-# lead_scoring_system.py (updated to support webhookData as an array of JSON strings)
+# lead_scoring_system.py (updated to support both webhookData AND native webhook format)
 from fastapi import FastAPI, Request
 from datetime import datetime
 import pandas as pd
@@ -56,33 +56,38 @@ def velocity_bonus(event_count, duration_min):
         return 1
     return 0
 
-def extract_events_from_webhook_payload(raw_input):
+def extract_events_from_payload(raw_input):
     all_events = []
     for block in raw_input:
-        webhook_items = block.get("webhookData", [])
-        for item_str in webhook_items:
-            try:
-                parsed = json.loads(item_str)
-            except Exception:
-                continue
-
-            for event in parsed.get("events", []):
+        if "webhookData" in block:
+            for item_str in block.get("webhookData", []):
+                try:
+                    parsed = json.loads(item_str)
+                except Exception:
+                    continue
+                for event in parsed.get("events", []):
+                    resolution = event.get("resolution", {})
+                    raw_email = resolution.get("PERSONAL_EMAILS", "")
+                    email = raw_email.split(",")[0].strip() if raw_email else None
+                    all_events.append({
+                        "hem_sha256": event.get("hem_sha256"),
+                        "event_type": event.get("event_type"),
+                        "event_timestamp": event.get("event_timestamp"),
+                        "personal_emails": email
+                    })
+        elif "events" in block:
+            for event in block.get("events", []):
                 resolution = event.get("resolution", {})
                 raw_email = resolution.get("PERSONAL_EMAILS", "")
                 email = raw_email.split(",")[0].strip() if raw_email else None
-
                 all_events.append({
                     "hem_sha256": event.get("hem_sha256"),
                     "event_type": event.get("event_type"),
                     "event_timestamp": event.get("event_timestamp"),
                     "personal_emails": email
                 })
-
     return pd.DataFrame(all_events)
 
-# -----------------------------
-# POST /score Endpoint
-# -----------------------------
 @app.post("/score")
 async def score_events(request: Request):
     try:
@@ -93,7 +98,7 @@ async def score_events(request: Request):
     except Exception as e:
         return {"error": "JSON decode failed", "reason": str(e)}
 
-    df = extract_events_from_webhook_payload(payload)
+    df = extract_events_from_payload(payload)
     df.dropna(subset=["hem_sha256", "event_type", "event_timestamp"], inplace=True)
     df["event_timestamp"] = pd.to_datetime(df["event_timestamp"], errors="coerce")
     df["event_score"] = df["event_type"].map(event_weights).fillna(0)
@@ -142,9 +147,6 @@ async def score_events(request: Request):
 
     return {"results": safe_result}
 
-# -----------------------------
-# POST /group-events Endpoint
-# -----------------------------
 @app.post("/group-events")
 async def group_events(request: Request):
     try:
@@ -155,7 +157,7 @@ async def group_events(request: Request):
     except Exception as e:
         return {"error": "JSON decode failed", "reason": str(e)}
 
-    df = extract_events_from_webhook_payload(payload)
+    df = extract_events_from_payload(payload)
     df.dropna(subset=["hem_sha256", "event_type"], inplace=True)
 
     grouped = df.groupby(["hem_sha256", "personal_emails"]).agg(
