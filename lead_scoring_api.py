@@ -1,4 +1,4 @@
-# lead_scoring_system.py (updated to support looping over webhookData per item)
+# lead_scoring_system.py (updated to support raw dict, webhookData, and events array)
 from fastapi import FastAPI, Request
 from datetime import datetime
 import pandas as pd
@@ -58,6 +58,11 @@ def velocity_bonus(event_count, duration_min):
 
 def extract_events_from_payload(raw_input):
     all_events = []
+
+    # Wrap single object payload into list
+    if isinstance(raw_input, dict):
+        raw_input = [raw_input]
+
     for block in raw_input:
         if "webhookData" in block:
             for item_str in block.get("webhookData", []):
