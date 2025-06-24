@@ -1,4 +1,4 @@
-# lead_scoring_system.py (updated to support both webhookData AND native webhook format)
+# lead_scoring_system.py (updated to support looping over webhookData per item)
 from fastapi import FastAPI, Request
 from datetime import datetime
 import pandas as pd
@@ -63,18 +63,19 @@ def extract_events_from_payload(raw_input):
             for item_str in block.get("webhookData", []):
                 try:
                     parsed = json.loads(item_str)
+                    if isinstance(parsed, dict) and "events" in parsed:
+                        for event in parsed.get("events", []):
+                            resolution = event.get("resolution", {})
+                            raw_email = resolution.get("PERSONAL_EMAILS", "")
+                            email = raw_email.split(",")[0].strip() if raw_email else None
+                            all_events.append({
+                                "hem_sha256": event.get("hem_sha256"),
+                                "event_type": event.get("event_type"),
+                                "event_timestamp": event.get("event_timestamp"),
+                                "personal_emails": email
+                            })
                 except Exception:
                     continue
-                for event in parsed.get("events", []):
-                    resolution = event.get("resolution", {})
-                    raw_email = resolution.get("PERSONAL_EMAILS", "")
-                    email = raw_email.split(",")[0].strip() if raw_email else None
-                    all_events.append({
-                        "hem_sha256": event.get("hem_sha256"),
-                        "event_type": event.get("event_type"),
-                        "event_timestamp": event.get("event_timestamp"),
-                        "personal_emails": email
-                    })
         elif "events" in block:
             for event in block.get("events", []):
                 resolution = event.get("resolution", {})
