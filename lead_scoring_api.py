@@ -1,5 +1,5 @@
-# lead_scoring_system.py (unified scoring + grouping API)
 from fastapi import FastAPI, Request
+from fastapi.responses import JSONResponse
 from datetime import datetime
 import pandas as pd
 import uvicorn
@@ -67,7 +67,7 @@ async def score_events(request: Request):
         decoder = JSONDecoder(strict=False)
         payload, _ = decoder.raw_decode(raw_str)
     except Exception as e:
-        return {"error": "JSON decode failed", "reason": str(e)}
+        return JSONResponse(content={"error": "JSON decode failed", "reason": str(e)}, status_code=400)
 
     all_events = []
     for block in payload:
@@ -113,24 +113,19 @@ async def score_events(request: Request):
 
     emails = df[["hem_sha256", "personal_emails"]].dropna().drop_duplicates()
     final = final.merge(emails, on="hem_sha256", how="left")
-
     final["final_score"] = final["final_score"].replace([np.inf, -np.inf, np.nan], 0)
     final = final.fillna("unknown")
 
     safe_result = []
     for _, row in final.iterrows():
-        try:
-            score = float(row["final_score"])
-        except:
-            score = 0.0
-
+        score = float(row["final_score"]) if pd.notnull(row["final_score"]) else 0.0
         safe_result.append({
-            "hem_sha256": row["hem_sha256"],
-            "personal_emails": row["personal_emails"],
-            "final_score": score
+            "hem_sha256": str(row["hem_sha256"]),
+            "personal_emails": str(row["personal_emails"]),
+            "final_score": round(score, 2)
         })
 
-    return {"results": safe_result}
+    return JSONResponse(content={"results": safe_result})
 
 # -----------------------------
 # POST /group-events Endpoint
@@ -143,7 +138,7 @@ async def group_events(request: Request):
         decoder = JSONDecoder(strict=False)
         payload, _ = decoder.raw_decode(raw_str)
     except Exception as e:
-        return {"error": "JSON decode failed", "reason": str(e)}
+        return JSONResponse(content={"error": "JSON decode failed", "reason": str(e)}, status_code=400)
 
     all_events = []
     for block in payload:
@@ -166,9 +161,16 @@ async def group_events(request: Request):
         events_collected=("event_type", lambda x: ", ".join(sorted(set(x))))
     ).reset_index()
 
-    results = grouped.to_dict(orient="records")
-    return {"results": results}
+    safe_results = []
+    for r in grouped.to_dict(orient="records"):
+        safe_results.append({
+            "hem_sha256": str(r.get("hem_sha256", "")),
+            "personal_emails": str(r.get("personal_emails", "")),
+            "events_collected": str(r.get("events_collected", ""))
+        })
 
-# Uncomment to run locally
+    return JSONResponse(content={"results": safe_results})
+
+# Uncomment to test locally
 # if __name__ == "__main__":
 #     uvicorn.run(app, host="0.0.0.0", port=8000)
