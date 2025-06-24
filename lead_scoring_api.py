@@ -1,4 +1,4 @@
-# lead_scoring_system.py (updated to accept webhook-style 'webhookData' payload)
+# lead_scoring_system.py (updated to support webhookData as an array of JSON strings)
 from fastapi import FastAPI, Request
 from datetime import datetime
 import pandas as pd
@@ -59,22 +59,24 @@ def velocity_bonus(event_count, duration_min):
 def extract_events_from_webhook_payload(raw_input):
     all_events = []
     for block in raw_input:
-        try:
-            inner_payload = json.loads(block.get("webhookData", "{}"))
-        except Exception:
-            continue
+        webhook_items = block.get("webhookData", [])
+        for item_str in webhook_items:
+            try:
+                parsed = json.loads(item_str)
+            except Exception:
+                continue
 
-        for event in inner_payload.get("events", []):
-            resolution = event.get("resolution", {})
-            raw_email = resolution.get("PERSONAL_EMAILS", "")
-            email = raw_email.split(",")[0].strip() if raw_email else None
+            for event in parsed.get("events", []):
+                resolution = event.get("resolution", {})
+                raw_email = resolution.get("PERSONAL_EMAILS", "")
+                email = raw_email.split(",")[0].strip() if raw_email else None
 
-            all_events.append({
-                "hem_sha256": event.get("hem_sha256"),
-                "event_type": event.get("event_type"),
-                "event_timestamp": event.get("event_timestamp"),
-                "personal_emails": email
-            })
+                all_events.append({
+                    "hem_sha256": event.get("hem_sha256"),
+                    "event_type": event.get("event_type"),
+                    "event_timestamp": event.get("event_timestamp"),
+                    "personal_emails": email
+                })
 
     return pd.DataFrame(all_events)
 
