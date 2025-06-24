@@ -1,5 +1,5 @@
+# lead_scoring_system.py (updated to accept webhook-style 'webhookData' payload)
 from fastapi import FastAPI, Request
-from fastapi.responses import JSONResponse
 from datetime import datetime
 import pandas as pd
 import uvicorn
@@ -56,6 +56,28 @@ def velocity_bonus(event_count, duration_min):
         return 1
     return 0
 
+def extract_events_from_webhook_payload(raw_input):
+    all_events = []
+    for block in raw_input:
+        try:
+            inner_payload = json.loads(block.get("webhookData", "{}"))
+        except Exception:
+            continue
+
+        for event in inner_payload.get("events", []):
+            resolution = event.get("resolution", {})
+            raw_email = resolution.get("PERSONAL_EMAILS", "")
+            email = raw_email.split(",")[0].strip() if raw_email else None
+
+            all_events.append({
+                "hem_sha256": event.get("hem_sha256"),
+                "event_type": event.get("event_type"),
+                "event_timestamp": event.get("event_timestamp"),
+                "personal_emails": email
+            })
+
+    return pd.DataFrame(all_events)
+
 # -----------------------------
 # POST /score Endpoint
 # -----------------------------
@@ -67,23 +89,9 @@ async def score_events(request: Request):
         decoder = JSONDecoder(strict=False)
         payload, _ = decoder.raw_decode(raw_str)
     except Exception as e:
-        return JSONResponse(content={"error": "JSON decode failed", "reason": str(e)}, status_code=400)
+        return {"error": "JSON decode failed", "reason": str(e)}
 
-    all_events = []
-    for block in payload:
-        for e in block.get("events", []):
-            resolution = e.get("resolution", {})
-            raw_email = resolution.get("PERSONAL_EMAILS", "")
-            email = raw_email.split(",")[0].strip() if raw_email else None
-
-            all_events.append({
-                "hem_sha256": e.get("hem_sha256"),
-                "event_type": e.get("event_type"),
-                "event_timestamp": e.get("event_timestamp"),
-                "personal_emails": email
-            })
-
-    df = pd.DataFrame(all_events)
+    df = extract_events_from_webhook_payload(payload)
     df.dropna(subset=["hem_sha256", "event_type", "event_timestamp"], inplace=True)
     df["event_timestamp"] = pd.to_datetime(df["event_timestamp"], errors="coerce")
     df["event_score"] = df["event_type"].map(event_weights).fillna(0)
@@ -113,19 +121,24 @@ async def score_events(request: Request):
 
     emails = df[["hem_sha256", "personal_emails"]].dropna().drop_duplicates()
     final = final.merge(emails, on="hem_sha256", how="left")
+
     final["final_score"] = final["final_score"].replace([np.inf, -np.inf, np.nan], 0)
     final = final.fillna("unknown")
 
     safe_result = []
     for _, row in final.iterrows():
-        score = float(row["final_score"]) if pd.notnull(row["final_score"]) else 0.0
+        try:
+            score = float(row["final_score"])
+        except:
+            score = 0.0
+
         safe_result.append({
-            "hem_sha256": str(row["hem_sha256"]),
-            "personal_emails": str(row["personal_emails"]),
-            "final_score": round(score, 2)
+            "hem_sha256": row["hem_sha256"],
+            "personal_emails": row["personal_emails"],
+            "final_score": score
         })
 
-    return JSONResponse(content={"results": safe_result})
+    return {"results": safe_result}
 
 # -----------------------------
 # POST /group-events Endpoint
@@ -138,39 +151,18 @@ async def group_events(request: Request):
         decoder = JSONDecoder(strict=False)
         payload, _ = decoder.raw_decode(raw_str)
     except Exception as e:
-        return JSONResponse(content={"error": "JSON decode failed", "reason": str(e)}, status_code=400)
+        return {"error": "JSON decode failed", "reason": str(e)}
 
-    all_events = []
-    for block in payload:
-        for e in block.get("events", []):
-            resolution = e.get("resolution", {})
-            raw_email = resolution.get("PERSONAL_EMAILS", "")
-            email = raw_email.split(",")[0].strip() if raw_email else None
-
-            all_events.append({
-                "hem_sha256": e.get("hem_sha256"),
-                "event_type": e.get("event_type"),
-                "event_timestamp": e.get("event_timestamp"),
-                "personal_emails": email
-            })
-
-    df = pd.DataFrame(all_events)
+    df = extract_events_from_webhook_payload(payload)
     df.dropna(subset=["hem_sha256", "event_type"], inplace=True)
 
     grouped = df.groupby(["hem_sha256", "personal_emails"]).agg(
         events_collected=("event_type", lambda x: ", ".join(sorted(set(x))))
     ).reset_index()
 
-    safe_results = []
-    for r in grouped.to_dict(orient="records"):
-        safe_results.append({
-            "hem_sha256": str(r.get("hem_sha256", "")),
-            "personal_emails": str(r.get("personal_emails", "")),
-            "events_collected": str(r.get("events_collected", ""))
-        })
+    results = grouped.to_dict(orient="records")
+    return {"results": results}
 
-    return JSONResponse(content={"results": safe_results})
-
-# Uncomment to test locally
+# Uncomment to run locally
 # if __name__ == "__main__":
 #     uvicorn.run(app, host="0.0.0.0", port=8000)
