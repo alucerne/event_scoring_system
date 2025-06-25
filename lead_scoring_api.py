@@ -1,4 +1,4 @@
-# lead_scoring_system.py (updated to support raw dict, webhookData, and events array)
+# lead_scoring_system.py (updated to accept direct event array format)
 from fastapi import FastAPI, Request
 from datetime import datetime
 import pandas as pd
@@ -56,42 +56,23 @@ def velocity_bonus(event_count, duration_min):
         return 1
     return 0
 
-def extract_events_from_payload(raw_input):
+def extract_events_from_payload(payload):
     all_events = []
 
-    # Wrap single object payload into list
-    if isinstance(raw_input, dict):
-        raw_input = [raw_input]
+    if isinstance(payload, dict) and "events" in payload:
+        payload = [payload]  # wrap in list if single dict
 
-    for block in raw_input:
-        if "webhookData" in block:
-            for item_str in block.get("webhookData", []):
-                try:
-                    parsed = json.loads(item_str)
-                    if isinstance(parsed, dict) and "events" in parsed:
-                        for event in parsed.get("events", []):
-                            resolution = event.get("resolution", {})
-                            raw_email = resolution.get("PERSONAL_EMAILS", "")
-                            email = raw_email.split(",")[0].strip() if raw_email else None
-                            all_events.append({
-                                "hem_sha256": event.get("hem_sha256"),
-                                "event_type": event.get("event_type"),
-                                "event_timestamp": event.get("event_timestamp"),
-                                "personal_emails": email
-                            })
-                except Exception:
-                    continue
-        elif "events" in block:
-            for event in block.get("events", []):
-                resolution = event.get("resolution", {})
-                raw_email = resolution.get("PERSONAL_EMAILS", "")
-                email = raw_email.split(",")[0].strip() if raw_email else None
-                all_events.append({
-                    "hem_sha256": event.get("hem_sha256"),
-                    "event_type": event.get("event_type"),
-                    "event_timestamp": event.get("event_timestamp"),
-                    "personal_emails": email
-                })
+    for block in payload:
+        for event in block.get("events", []):
+            resolution = event.get("resolution", {})
+            raw_email = resolution.get("PERSONAL_EMAILS", "")
+            email = raw_email.split(",")[0].strip() if raw_email else None
+            all_events.append({
+                "hem_sha256": event.get("hem_sha256"),
+                "event_type": event.get("event_type"),
+                "event_timestamp": event.get("event_timestamp"),
+                "personal_emails": email
+            })
     return pd.DataFrame(all_events)
 
 @app.post("/score")
