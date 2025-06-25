@@ -1,10 +1,8 @@
-# lead_scoring_system.py (updated to accept direct event array format)
+# lead_scoring_system.py (updated with safe JSON parser)
 from fastapi import FastAPI, Request
 from datetime import datetime
 import pandas as pd
 import uvicorn
-import json
-from json.decoder import JSONDecoder
 import numpy as np
 
 app = FastAPI()
@@ -78,10 +76,7 @@ def extract_events_from_payload(payload):
 @app.post("/score")
 async def score_events(request: Request):
     try:
-        raw_body = await request.body()
-        raw_str = raw_body.decode("utf-8").strip()
-        decoder = JSONDecoder(strict=False)
-        payload, _ = decoder.raw_decode(raw_str)
+        payload = await request.json()
     except Exception as e:
         return {"error": "JSON decode failed", "reason": str(e)}
 
@@ -137,10 +132,7 @@ async def score_events(request: Request):
 @app.post("/group-events")
 async def group_events(request: Request):
     try:
-        raw_body = await request.body()
-        raw_str = raw_body.decode("utf-8").strip()
-        decoder = JSONDecoder(strict=False)
-        payload, _ = decoder.raw_decode(raw_str)
+        payload = await request.json()
     except Exception as e:
         return {"error": "JSON decode failed", "reason": str(e)}
 
