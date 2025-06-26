@@ -1,9 +1,11 @@
-# lead_scoring_system.py (updated with extra fields in /group-events)
+# lead_scoring_system.py (field filtering + mandatory event_type + required hem/event)
 from fastapi import FastAPI, Request
+from fastapi.params import Query
 from datetime import datetime
 import pandas as pd
 import uvicorn
 import numpy as np
+from typing import Optional
 
 app = FastAPI()
 
@@ -62,6 +64,9 @@ def extract_events_from_payload(payload):
 
     for block in payload:
         for event in block.get("events", []):
+            if not event.get("event_type") or not event.get("hem_sha256"):
+                continue  # Must include both event_type and hem_sha256
+
             resolution = event.get("resolution", {})
             raw_email = resolution.get("PERSONAL_EMAILS", "")
             email = raw_email.split(",")[0].strip() if raw_email else None
@@ -71,19 +76,17 @@ def extract_events_from_payload(payload):
                 "event_type": event.get("event_type"),
                 "event_timestamp": event.get("event_timestamp"),
                 "personal_emails": email,
-                "skiptrace_name": resolution.get("SKIPTRACE_NAME"),
-                "net_worth": resolution.get("NET_WORTH"),
-                "personal_city": resolution.get("PERSONAL_CITY"),
-                "income_range": resolution.get("INCOME_RANGE"),
-                "age_range": resolution.get("AGE_RANGE")
             }
-            flat_event.update(event)
+
+            for k, v in resolution.items():
+                flat_event[k.lower()] = v
+
             all_events.append(flat_event)
 
     return pd.DataFrame(all_events)
 
 @app.post("/score")
-async def score_events(request: Request):
+async def score_events(request: Request, fields: Optional[str] = Query(None)):
     try:
         payload = await request.json()
     except Exception as e:
@@ -124,22 +127,17 @@ async def score_events(request: Request):
     final = final.fillna("unknown")
 
     safe_result = []
-    for _, row in final.iterrows():
-        try:
-            score = float(row["final_score"])
-        except:
-            score = 0.0
+    field_list = fields.split(",") if fields else None
 
-        safe_result.append({
-            "hem_sha256": row["hem_sha256"],
-            "personal_emails": row["personal_emails"],
-            "final_score": score
-        })
+    for _, row in final.iterrows():
+        result = {col: row[col] for col in row.index if not field_list or col in field_list}
+        result["final_score"] = float(row["final_score"])
+        safe_result.append(result)
 
     return {"results": safe_result}
 
 @app.post("/group-events")
-async def group_events(request: Request):
+async def group_events(request: Request, fields: Optional[str] = Query(None)):
     try:
         payload = await request.json()
     except Exception as e:
@@ -148,14 +146,15 @@ async def group_events(request: Request):
     df = extract_events_from_payload(payload)
     df.dropna(subset=["hem_sha256", "event_type"], inplace=True)
 
-    grouped = df.groupby(["hem_sha256", "personal_emails"]).agg(
-        events_collected=("event_type", lambda x: ", ".join(sorted(set(x)))),
-        skiptrace_name=("skiptrace_name", "first"),
-        net_worth=("net_worth", "first"),
-        personal_city=("personal_city", "first"),
-        income_range=("income_range", "first"),
-        age_range=("age_range", "first")
-    ).reset_index()
+    group_keys = ["hem_sha256", "personal_emails"]
+    agg_fields = {k: (k, "first") for k in df.columns if k not in group_keys + ["event_type", "event_timestamp"]}
+    agg_fields["events_collected"] = ("event_type", lambda x: ", ".join(sorted(set(x))))
+
+    grouped = df.groupby(group_keys).agg(**agg_fields).reset_index()
+
+    if fields:
+        field_list = fields.split(",")
+        grouped = grouped[[col for col in grouped.columns if col in field_list]]
 
     results = grouped.to_dict(orient="records")
     return {"results": results}
@@ -163,3 +162,4 @@ async def group_events(request: Request):
 # Uncomment to run locally
 # if __name__ == "__main__":
 #     uvicorn.run(app, host="0.0.0.0", port=8000)
+
