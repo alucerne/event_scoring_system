@@ -1,4 +1,4 @@
-# lead_scoring_system.py (field filtering + mandatory event_type + required hem/event)
+# lead_scoring_system.py (field filtering + single-value fields enforced)
 from fastapi import FastAPI, Request
 from fastapi.params import Query
 from datetime import datetime
@@ -56,6 +56,11 @@ def velocity_bonus(event_count, duration_min):
         return 1
     return 0
 
+def extract_first_value(val):
+    if isinstance(val, str) and "," in val:
+        return val.split(",")[0].strip()
+    return val
+
 def extract_events_from_payload(payload):
     all_events = []
 
@@ -79,7 +84,7 @@ def extract_events_from_payload(payload):
             }
 
             for k, v in resolution.items():
-                flat_event[k.lower()] = v
+                flat_event[k.lower()] = extract_first_value(v)
 
             all_events.append(flat_event)
 
@@ -162,4 +167,3 @@ async def group_events(request: Request, fields: Optional[str] = Query(None)):
 # Uncomment to run locally
 # if __name__ == "__main__":
 #     uvicorn.run(app, host="0.0.0.0", port=8000)
-
