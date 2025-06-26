@@ -1,4 +1,4 @@
-# lead_scoring_system.py (updated with full event payload retention)
+# lead_scoring_system.py (updated with extra fields in /group-events)
 from fastapi import FastAPI, Request
 from datetime import datetime
 import pandas as pd
@@ -70,9 +70,13 @@ def extract_events_from_payload(payload):
                 "hem_sha256": event.get("hem_sha256"),
                 "event_type": event.get("event_type"),
                 "event_timestamp": event.get("event_timestamp"),
-                "personal_emails": email
+                "personal_emails": email,
+                "skiptrace_name": resolution.get("SKIPTRACE_NAME"),
+                "net_worth": resolution.get("NET_WORTH"),
+                "personal_city": resolution.get("PERSONAL_CITY"),
+                "income_range": resolution.get("INCOME_RANGE"),
+                "age_range": resolution.get("AGE_RANGE")
             }
-            # Include all other raw fields in case needed later
             flat_event.update(event)
             all_events.append(flat_event)
 
@@ -145,7 +149,12 @@ async def group_events(request: Request):
     df.dropna(subset=["hem_sha256", "event_type"], inplace=True)
 
     grouped = df.groupby(["hem_sha256", "personal_emails"]).agg(
-        events_collected=("event_type", lambda x: ", ".join(sorted(set(x))))
+        events_collected=("event_type", lambda x: ", ".join(sorted(set(x)))),
+        skiptrace_name=("skiptrace_name", "first"),
+        net_worth=("net_worth", "first"),
+        personal_city=("personal_city", "first"),
+        income_range=("income_range", "first"),
+        age_range=("age_range", "first")
     ).reset_index()
 
     results = grouped.to_dict(orient="records")
