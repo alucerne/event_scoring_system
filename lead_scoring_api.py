@@ -1,4 +1,4 @@
-# lead_scoring_system.py (updated with safe JSON parser)
+# lead_scoring_system.py (updated with full event payload retention)
 from fastapi import FastAPI, Request
 from datetime import datetime
 import pandas as pd
@@ -58,19 +58,24 @@ def extract_events_from_payload(payload):
     all_events = []
 
     if isinstance(payload, dict) and "events" in payload:
-        payload = [payload]  # wrap in list if single dict
+        payload = [payload]
 
     for block in payload:
         for event in block.get("events", []):
             resolution = event.get("resolution", {})
             raw_email = resolution.get("PERSONAL_EMAILS", "")
             email = raw_email.split(",")[0].strip() if raw_email else None
-            all_events.append({
+
+            flat_event = {
                 "hem_sha256": event.get("hem_sha256"),
                 "event_type": event.get("event_type"),
                 "event_timestamp": event.get("event_timestamp"),
                 "personal_emails": email
-            })
+            }
+            # Include all other raw fields in case needed later
+            flat_event.update(event)
+            all_events.append(flat_event)
+
     return pd.DataFrame(all_events)
 
 @app.post("/score")
