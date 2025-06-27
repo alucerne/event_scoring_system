@@ -1,4 +1,4 @@
-# lead_scoring_system.py (field filtering + single-value fields enforced)
+# lead_scoring_system.py (field filtering + single-value fields enforced + event_data flattening)
 from fastapi import FastAPI, Request
 from fastapi.params import Query
 from datetime import datetime
@@ -61,6 +61,20 @@ def extract_first_value(val):
         return val.split(",")[0].strip()
     return val
 
+def flatten_event_data(event):
+    event_data = event.get("event_data", {})
+    return {
+        "referrer": event_data.get("referrer"),
+        "timestamp": event_data.get("timestamp"),
+        "title": event_data.get("title"),
+        "url": event_data.get("url"),
+        "percentage": event_data.get("percentage"),
+        "element_tag": event_data.get("element", {}).get("tag"),
+        "element_text": event_data.get("element", {}).get("text"),
+        "element_href": event_data.get("element", {}).get("attributes", {}).get("href"),
+        "element_class": event_data.get("element", {}).get("attributes", {}).get("class")
+    }
+
 def extract_events_from_payload(payload):
     all_events = []
 
@@ -70,7 +84,7 @@ def extract_events_from_payload(payload):
     for block in payload:
         for event in block.get("events", []):
             if not event.get("event_type") or not event.get("hem_sha256"):
-                continue  # Must include both event_type and hem_sha256
+                continue
 
             resolution = event.get("resolution", {})
             raw_email = resolution.get("PERSONAL_EMAILS", "")
@@ -86,6 +100,7 @@ def extract_events_from_payload(payload):
             for k, v in resolution.items():
                 flat_event[k.lower()] = extract_first_value(v)
 
+            flat_event.update(flatten_event_data(event))
             all_events.append(flat_event)
 
     return pd.DataFrame(all_events)
@@ -136,7 +151,7 @@ async def score_events(request: Request, fields: Optional[str] = Query(None)):
 
     for _, row in final.iterrows():
         result = {col: row[col] for col in row.index if not field_list or col in field_list}
-        result["final_score"] = float(row["final_score"])
+        result["score"] = float(row["final_score"])
         safe_result.append(result)
 
     return {"results": safe_result}
@@ -159,7 +174,7 @@ async def group_events(request: Request, fields: Optional[str] = Query(None)):
 
     if fields:
         field_list = fields.split(",")
-        grouped = grouped[[col for col in grouped.columns if col in field_list]]
+        grouped = grouped[[col for col in grouped.columns if col in field_list or col in group_keys or col == "events_collected"]]
 
     results = grouped.to_dict(orient="records")
     return {"results": results}
