@@ -179,36 +179,30 @@ async def group_events(request: Request, fields: Optional[str] = Query(None)):
     results = grouped.to_dict(orient="records")
     return {"results": results}
 
+# -----------------------------
+# Recursive Cleaner for DataCleaning
+# -----------------------------
+def clean_any(data):
+    if isinstance(data, dict):
+        return {k: clean_any(v) for k, v in data.items()}
+    elif isinstance(data, list):
+        return [clean_any(item) for item in data]
+    elif isinstance(data, str) and "," in data:
+        return data.split(",")[0].strip()
+    else:
+        return data
+
 @app.post("/datacleaning")
 async def datacleaning(request: Request):
-    """
-    Cleans records by extracting only the first value from any comma-separated string in each field.
-    Handles a single dict or a list of dicts as input.
-    Returns the cleaned data as a list of dicts.
-    """
     try:
         payload = await request.json()
     except Exception as e:
         return {"error": "JSON decode failed", "reason": str(e)}
 
-    def clean_record(record):
-        cleaned = {}
-        for k, v in record.items():
-            if isinstance(v, str) and "," in v:
-                cleaned[k] = v.split(",")[0].strip()
-            else:
-                cleaned[k] = v
-        return cleaned
-
-    # Accept both single dict and list of dicts
-    if isinstance(payload, dict):
-        records = [payload]
-    elif isinstance(payload, list):
-        records = payload
-    else:
-        return {"error": "Input must be a dict or a list of dicts."}
-
-    cleaned_data = [clean_record(record) for record in records]
+    cleaned_data = clean_any(payload)
+    # Always return as a list of records for Make compatibility
+    if isinstance(cleaned_data, dict):
+        cleaned_data = [cleaned_data]
 
     return {"cleaned": cleaned_data}
 
